@@ -191,6 +191,17 @@ void M2Board::irq_update() {
         }
 }
 
+// The lockstep count is instructions; a 25 MHz frame (434k cycles) is ~110000 of them (GameLoop::kFrameCap).
+static constexpr uint64_t kCyclesPerInsn = 4;
+
+void M2Board::timer_expire(int n) {
+    // model2_timer_cb: raise request bit 2+n if enabled, reload 0xfffff, stop
+    const uint32_t line = 1u << (n + 2);
+    timervals_[n] = 0xfffff;
+    timerrun_[n] = false;
+    if (intena_ & line) { intreq_ |= line; irq_update(); }
+}
+
 void M2Board::vblank_start() {
     // 60 Hz mode or an even frame: the geometrizer starts a new frame
     if ((videocontrol_ & 1) == 0 || (frame_ & 1) == 0) {
@@ -273,7 +284,16 @@ void M2Board::uart_txrdy(bool state) {
     }
 }
 
+void M2Board::sound_reply(const std::vector<uint8_t> &bytes) {
+    for (uint8_t b : bytes) uart_rx_.push_back(b);
+    if (!bytes.empty() && (intena_ & (1u << 10))) { // sound_ready_w: RxRDY raises request 10 too
+        intreq_ |= 1u << 10;
+        irq_update();
+    }
+}
+
 void M2Board::uart_write_data(uint8_t v) {
+    if (std::getenv("UART_TRACE")) std::fprintf(stderr, "uart w %02x ip %08x\n", v, cpu_->m_IP);
     uart_hold_ = v;
     uart_have_hold_ = true;
     uart_txrdy(false);
@@ -306,6 +326,19 @@ uint32_t M2Board::dev_read(uint32_t addr, uint32_t mask) {
     if (addr >= 0x00800000 && addr <= 0x00803fff) return tgp_.geo_r((addr - 0x00800000) >> 2);
     if (addr >= 0x00804000 && addr <= 0x00807fff) return 0xffffffffu; // geo_prg_r
     if (addr >= 0x00884000 && addr <= 0x00887fff) return tgp_.fifo_r();
+    if (addr >= 0x01c80000 && addr <= 0x01c80003) { // i8251: lane 0 data, lane 2 status
+        uint32_t v = 0;
+        if (std::getenv("UART_TRACE")) std::fprintf(stderr, "uart r %08x mask %08x ip %08x\n", addr, mask, cpu_->m_IP);
+        if (mask & 0x000000ff) {
+            if (!uart_rx_.empty()) {
+                v |= uart_rx_.front();
+                uart_rx_.pop_front();
+            }
+        }
+        if (mask & 0x00ff0000) // TxRDY, RxRDY, TxEMPTY, DSR
+            v |= uint32_t(0x84 | (uart_txrdy_ ? 1 : 0) | (uart_rx_.empty() ? 0 : 2)) << 16;
+        return v;
+    }
     switch (addr) {
     case 0x00980000: return tgp_.coproctl_r();
     case 0x00980004: {
@@ -358,6 +391,7 @@ void M2Board::dev_write(uint32_t addr, uint32_t data, uint32_t mask) {
     case 0x00e80000: intreq_ &= data | ~mask; irq_update(); return; // irq_ack_w
     case 0x00e80004: {                                                // irq_enable_w (MAME delays 80 ns)
         intena_ = (intena_ & ~mask) | (data & mask);
+        if (std::getenv("UART_TRACE")) std::fprintf(stderr, "intena=%08x txrdy=%d ip %08x\n", intena_, uart_txrdy_, cpu_->m_IP);
         if (uart_txrdy_ && (intena_ & (1u << 10))) intreq_ |= 1u << 10; // irq_mask_delayed_update
         irq_update();
         return;
@@ -371,6 +405,16 @@ void M2Board::dev_write(uint32_t addr, uint32_t data, uint32_t mask) {
         // value is kept without a clock.
         uint32_t &t = timervals_[(addr >> 2) & 3];
         t = (t & ~mask) | (data & mask);
+        // MAME timers_w: (re)start counting down from the written value at 25 MHz
+        const int n = (addr >> 2) & 3;
+        timerrun_[n] = true;
+        const uint64_t gen = ++timer_gen_[n];
+#ifdef M2_FAST_GEN
+        const uint64_t at = ls_->now() + t / kCyclesPerInsn + 1;
+#else
+        const uint64_t at = ls_->count + t / kCyclesPerInsn + 1;
+#endif
+        ls_->add_callback(at, [this, n, gen] { if (timerrun_[n] && timer_gen_[n] == gen) timer_expire(n); });
         return;
     }
     if ((addr & ~0x100000u) == 0x01040000) { if (mask & 0xffff) video_->xhout_w(uint16_t(data)); return; }

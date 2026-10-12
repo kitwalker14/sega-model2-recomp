@@ -147,6 +147,14 @@ int main(int argc, char **argv) {
         std::vector<float> fm, pcm;
         uint64_t drive_commands = 0, drive_kinds[16] = {}; // the force feedback drive board's commands, by type
         for (uint64_t f = 0; f < frames; f++) {
+            if (const char *inj = std::getenv("M2_SND_INJECT"); inj && game.sound() && f == 60) {
+                std::vector<uint8_t> b;
+                for (const char *p = inj; p[0] && p[1]; p += 2) {
+                    if (p[0] == ' ') { ++p; --p; continue; }
+                    b.push_back(uint8_t(std::strtoul(std::string(p, 2).c_str(), nullptr, 16)));
+                }
+                game.sound()->send(b.data(), b.size());
+            }
             game.run_frame(script.at(game.board().frame()));
             for (uint8_t c : std::exchange(game.board().io().drive_commands, {})) ++drive_commands, ++drive_kinds[c >> 4];
             if (native) { // the app's native audio path, frame by frame
@@ -203,8 +211,8 @@ int main(int argc, char **argv) {
             if (drive_kinds[k]) std::printf("%s%x-: %" PRIu64, first ? "" : ", ", k, drive_kinds[k]), first = 0;
         std::printf(")\n");
         if (const snd::SoundBoard *sb = game.sound())
-            std::printf("  sound board: %" PRIu64 " 68000 instructions (all native), %zu command bytes received\n", sb->instructions(),
-                        sb->bytes_received());
+            std::printf("  sound board: %" PRIu64 " 68000 instructions (all native), %zu command bytes received, %zu MIDI-out bytes\n", sb->instructions(),
+                        sb->bytes_received(), sb->reply_total());
         if (!wav_path.empty() && game.sound()) {
             std::vector<float> mix;
             mix_into(mix, fm, game.sound()->fm_rate(), 48000);

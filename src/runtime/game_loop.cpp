@@ -34,7 +34,7 @@ GameLoop::GameLoop(const std::string &dir, bool sound_enabled) : GameLoop([&] {
 }(), sound_enabled) {}
 
 GameLoop::GameLoop(M2Board::Images img, bool sound_enabled) {
-    if (sound_enabled && !img.sound_program.empty()) sound_ = std::make_unique<snd::SoundBoard>(img.sound_program, img.pcm1, img.pcm2);
+    if (sound_enabled && !img.sound_program.empty()) sound_ = std::make_unique<snd::SoundBoard>(img.sound_program, img.pcm1, img.pcm2, img.sound_program.size() > 8 && img.sound_program[5] == 0x60); // reset PC at 0x6000xx: Model 2A SCSP board
     board_ = std::make_unique<M2Board>(std::move(img));
     cpu_ = std::make_unique<Cpu>(board_.get());
     ls_ = std::make_unique<Lockstep>(*cpu_);
@@ -122,8 +122,9 @@ void GameLoop::run_frame_deferred_sound(const Inputs &inputs) {
 #else
         if (!gen::has_code(cpu_->m_IP)) {
 #endif
-            char b[128];
-            std::snprintf(b, sizeof b, "no recompiled code at %08x: add it to the seeds", cpu_->m_IP);
+            char b[200];
+            std::snprintf(b, sizeof b, "no recompiled code at %08x: add it to the seeds (pip %08x rip/r2 %08x r3 %08x g0 %08x)", cpu_->m_IP,
+                          cpu_->m_PIP, cpu_->m_r[2], cpu_->m_r[3], cpu_->m_r[16]);
             throw Fatal(b);
         }
 #ifndef M2_FAST_GEN
@@ -133,6 +134,7 @@ void GameLoop::run_frame_deferred_sound(const Inputs &inputs) {
     // Transfer the UART bytes on the owning thread. The sound worker never
     // touches M2Board, video, i960/TGP state, or the frame profiler.
     if (sound_) {
+        board_->sound_reply(sound_->take_reply_bytes());
         pending_sound_bytes_ = board_->take_sound_bytes();
         sound_frame_pending_ = true;
     }

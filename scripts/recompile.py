@@ -34,6 +34,13 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Sets whose board has no TGP (Model 2A): nothing to recompile for it, and
+# CMake links the in-tree stub instead of a generated tgp_gen.cpp.
+NO_TGP_SETS = set()  # every set has a TGP (Sega Rally uploads its program from its own program ROM)
+SCSP_SETS = {"srallyc"}  # Model 2A sound board: 68000 + SCSP
+# Code the game copies from ROM into RAM and runs there: BASE:ROMOFF:SIZE (srallyc copies ROM 0x1000.. to 0x5a0000, 0x60000 bytes)
+RAM_OVERLAY = {"srallyc": "5a0000:1000:60000"}
+
 
 # Exit status for "the ROM set was rejected", so setup.py can tell it from a
 # failure to recompile or build (which exit 1, with the tool's own errors).
@@ -57,7 +64,7 @@ def tool(build, config, name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", default="daytona93", choices=["daytona93", "daytona"])
+    ap.add_argument("--set", default="daytona93", choices=["daytona93", "daytona", "srallyc"])
     ap.add_argument("--build-dir", default="build")
     ap.add_argument("--config", default="Release")
     ap.add_argument("--fast_inaccuracy", action="store_true",
@@ -87,21 +94,26 @@ def main():
     os.makedirs(gen, exist_ok=True)
     recomp = [tool(build, args.config, "m2recomp"), os.path.join(cache, "program.bin"), gen,
               "--seeds", os.path.join("seeds", args.set + ".txt")]
+    if args.set in RAM_OVERLAY:
+        recomp += ["--ram-overlay", RAM_OVERLAY[args.set]]
     hooks = os.path.join("seeds", args.set + "_hooks.txt")
     if os.path.exists(os.path.join(ROOT, hooks)):
         recomp += ["--hooks", hooks]
     if args.fast_inaccuracy:
         recomp += ["--fast_inaccuracy"]
     run(recomp)
-    tgp = os.path.join(build, "gen", args.set + "_tgp")
-    os.makedirs(tgp, exist_ok=True)
-    run([tool(build, args.config, "m2tgprecomp"), os.path.join(cache, "tgp_program.bin"),
-         os.path.join(tgp, "tgp_gen.cpp")] + (["--fast_inaccuracy"] if args.fast_inaccuracy else []))
+    if args.set not in NO_TGP_SETS:
+        tgp = os.path.join(build, "gen", args.set + "_tgp")
+        os.makedirs(tgp, exist_ok=True)
+        run([tool(build, args.config, "m2tgprecomp"), os.path.join(cache, "tgp_program.bin"),
+             os.path.join(tgp, "tgp_gen.cpp")] + (["--fast_inaccuracy"] if args.fast_inaccuracy else []))
 
     snd = os.path.join(build, "gen", args.set + "_snd")
     os.makedirs(snd, exist_ok=True)
     run([tool(build, args.config, "m2sndrecomp"), os.path.join(cache, "sound_program.bin"),
-         os.path.join(snd, "snd_gen.cpp")])
+         os.path.join(snd, "snd_gen.cpp")] + (["--board", "scsp"] if args.set in SCSP_SETS else [])
+        + (["--seeds", os.path.join("seeds", args.set + "_snd.txt")]
+           if os.path.exists(os.path.join("seeds", args.set + "_snd.txt")) else []))
 
     run(["cmake", "-S", ".", "-B", build])  # picks up the generated sources
     run(build_cmd + ["--parallel"])  # the game (daytona, m2run) and the check tools

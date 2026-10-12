@@ -18,6 +18,7 @@
 
 #include "m68k/reach.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -411,8 +412,10 @@ int main(int argc, char **argv) {
     }
     const std::vector<uint8_t> img = load(argv[1]);
     std::vector<uint32_t> seeds;
+    bool scsp = false;
     for (int i = 3; i < argc; ++i)
-        if (!std::strcmp(argv[i], "--seeds") && i + 1 < argc) {
+        if (!std::strcmp(argv[i], "--board") && i + 1 < argc) scsp = !std::strcmp(argv[++i], "scsp");
+        else if (!std::strcmp(argv[i], "--seeds") && i + 1 < argc) {
             std::ifstream f(argv[++i]);
             std::string l;
             while (std::getline(f, l))
@@ -422,11 +425,22 @@ int main(int argc, char **argv) {
     // Sound board map: ROM at 0, its upper 128 KiB mirrored at 0x080000.
     auto read = [&](uint32_t a) -> std::optional<uint16_t> {
         a &= 0xffffff;
+        if (scsp) { // Model 2A SCSP board: program ROM at 0x600000
+            if (a < 0x600000 || a >= 0x640000 || a - 0x600000 + 1 >= img.size()) return std::nullopt;
+            a -= 0x600000;
+            return uint16_t(img[a] << 8 | img[a + 1]);
+        }
         if (a >= 0x80000 && a < 0xa0000) a -= 0x60000;
         if (a + 1 >= img.size() || a >= 0x40000) return std::nullopt;
         return uint16_t(img[a] << 8 | img[a + 1]);
     };
-    std::vector<uint32_t> all = m68k::vector_seeds(read);
+    std::vector<uint32_t> all;
+    if (scsp) { // the vector table is ROM offset 0 (copied to RAM at 0 on reset)
+        for (uint32_t v = 1; v < 64 && v * 4 + 3 < img.size(); ++v) {
+            const uint32_t t = uint32_t(img[v*4]) << 24 | img[v*4+1] << 16 | img[v*4+2] << 8 | img[v*4+3];
+            if (!(t & 1) && read(t) && std::find(all.begin(), all.end(), t) == all.end()) all.push_back(t);
+        }
+    } else all = m68k::vector_seeds(read);
     all.insert(all.end(), seeds.begin(), seeds.end());
     const m68k::ReachResult r = m68k::reach(all, read);
 
@@ -448,6 +462,7 @@ int main(int argc, char **argv) {
             em.line("{ c.pc = " + hex(in.addr + in.length) + "; goto dispatch; }");
     }
     em.o << "}\n\nnamespace {\nconst uint32_t kAddrs[] = {\n";
+    if (addrs.empty()) em.o << "    0xffffffffu, // placeholder: no reachable sound code\n";
     for (uint32_t a : addrs) em.o << "    " << hex(a) << ",\n";
     em.o << "};\n} // namespace\n\n"
          << "bool has_code(uint32_t a) { return std::binary_search(std::begin(kAddrs), std::end(kAddrs), a); }\n\n"

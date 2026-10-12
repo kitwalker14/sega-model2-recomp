@@ -88,12 +88,13 @@ target_include_directories(trace PUBLIC src)
 # interrupts, memory; MAME's semantics, transplanted, BSD-3), replay bus and
 # lockstep. No instruction interpreter.
 # The ROM set the game is recompiled from: daytona93 (Daytona USA Deluxe '93,
-# the default) or daytona (Revision A, 1994). One set per build directory:
-# its generated code, seeds and saves are its own.
-set(M2_ROMSET daytona93 CACHE STRING "MAME ROM set to recompile: daytona93 or daytona")
-set_property(CACHE M2_ROMSET PROPERTY STRINGS daytona93 daytona)
-if(NOT M2_ROMSET MATCHES "^(daytona93|daytona)$")
-    message(FATAL_ERROR "M2_ROMSET must be daytona93 or daytona, not ${M2_ROMSET}")
+# the default), daytona (Revision A, 1994) or srallyc (Sega Rally
+# Championship, Revision B; a Model 2A board, no TGP). One set per build
+# directory: its generated code, seeds and saves are its own.
+set(M2_ROMSET daytona93 CACHE STRING "MAME ROM set to recompile: daytona93, daytona or srallyc")
+set_property(CACHE M2_ROMSET PROPERTY STRINGS daytona93 daytona srallyc)
+if(NOT M2_ROMSET MATCHES "^(daytona93|daytona|srallyc)$")
+    message(FATAL_ERROR "M2_ROMSET must be daytona93, daytona or srallyc, not ${M2_ROMSET}")
 endif()
 
 add_library(runtime STATIC
@@ -112,6 +113,7 @@ add_library(runtime STATIC
     src/runtime/lockstep.cpp
     src/runtime/snd_cpu.cpp
     src/runtime/multipcm.cpp
+    src/runtime/scsp.cpp
     src/runtime/sound_board.cpp
     src/runtime/native_sample_mixer.cpp
     src/runtime/native_sound_sequencer.cpp
@@ -242,8 +244,8 @@ endif()
 # Recompiled game code lives in build/gen/<set>/ (derived from the game: never
 # committed). scripts/recompile.sh generates it and re-runs CMake.
 set(GEN_DIR ${M2_GEN_ROOT}/${M2_ROMSET})
-set(TGP_GEN ${M2_GEN_ROOT}/${M2_ROMSET}_tgp/tgp_gen.cpp)
 set(SND_GEN ${M2_GEN_ROOT}/${M2_ROMSET}_snd/snd_gen.cpp)
+set(TGP_GEN ${M2_GEN_ROOT}/${M2_ROMSET}_tgp/tgp_gen.cpp)
 if(EXISTS ${GEN_DIR}/gen_table.cpp AND EXISTS ${TGP_GEN} AND EXISTS ${SND_GEN})
     file(GLOB GEN_SOURCES ${GEN_DIR}/*.cpp)
     add_executable(m2native tools/m2native/main.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
@@ -299,7 +301,7 @@ target_link_libraries(m2import PRIVATE runtime)
 
 add_executable(m2tgprecomp tools/m2tgprecomp/main.cpp)
 target_include_directories(m2tgprecomp PRIVATE src)
-if(EXISTS ${TGP_GEN})
+if(EXISTS ${M2_GEN_ROOT}/${M2_ROMSET}_tgp/tgp_gen.cpp)
     add_executable(m2tgpcheck tools/m2tgpcheck/main.cpp ${TGP_GEN})
     target_link_libraries(m2tgpcheck PRIVATE runtime)
     # The per-instruction hook exists only in this test build.

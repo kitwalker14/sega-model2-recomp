@@ -5,6 +5,10 @@
 namespace snd {
 
 void Cpu68k::reset() {
+    if (scsp) {
+        if (sram.size() < 0x80000) sram.assign(0x80000, 0);
+        for (int i = 0; i < 16; ++i) sram[i] = rom[i]; // vector table copied into RAM
+    }
     sys = 0x2700;
     set_ccr(0);
     a[7] = r32(0);

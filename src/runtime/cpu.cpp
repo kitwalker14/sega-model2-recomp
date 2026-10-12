@@ -334,6 +334,17 @@ void Cpu::do_ret_0()
 	m_IP = m_r[I960_RIP];
 }
 
+void Cpu::flushreg()
+{
+	// FLUSHREG: spill the cached register frames back to their stack frames
+	// and empty the cache (MAME i960: case 0x66d).
+	if (m_rcache_pos > 4) m_rcache_pos = 4;
+	for (int32_t t1 = 0; t1 < m_rcache_pos; t1++)
+		for (int i = 0; i < 0x10; i++)
+			bus->write_dword(m_rcache_frame_addr[t1] + i * sizeof(uint32_t), m_rcache[t1][i]);
+	m_rcache_pos = 0;
+}
+
 void Cpu::do_ret()
 {
 	uint32_t x, y;

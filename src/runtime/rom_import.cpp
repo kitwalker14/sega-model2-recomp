@@ -81,20 +81,53 @@ const Load kDaytona[] = {
 };
 #undef SHARED_LOADS
 
+// Sega Rally Championship, Revision B (srallycb): a Model 2A board, which
+// has no TGP and so no TGP program to upload. MAME model2.cpp
+// ROM_START(srallycb). The program and data ROMs are shared with srallyc
+// (Revision C); the copro tables are the shared MODEL2_CPU_BOARD chips.
+const Load kSrallycb[] = {
+    {"epr-17888b.12", 0x95BCE0B9, Program, 0x000000, 0x080000},
+    {"epr-17889b.13", 0x395C425E, Program, 0x000002, 0x080000},
+    {"mpr-17746.10", 0x8FE311F4, MainData, 0x000000, 0x200000},
+    {"mpr-17747.11", 0x543593FD, MainData, 0x000002, 0x200000},
+    {"mpr-17744.8", 0x71FED098, MainData, 0x400000, 0x200000},
+    {"mpr-17745.9", 0x8ECCA705, MainData, 0x400002, 0x200000},
+    {"mpr-17884.6", 0x4CFC95E1, MainData, 0x800000, 0x200000},
+    {"mpr-17885.7", 0xA08D2467, MainData, 0x800002, 0x200000},
+    {"mpr-17754.29", 0x81A84F67, CoproData, 0x000000, 0x200000},
+    {"mpr-17755.28", 0x2A6E7DA4, CoproData, 0x000002, 0x200000},
+    {"mpr-17748.16", 0x3148A2B2, Polygons, 0x000000, 0x200000},
+    {"mpr-17750.20", 0x232AEC29, Polygons, 0x000002, 0x200000},
+    {"mpr-17749.17", 0x0838D184, Polygons, 0x400000, 0x200000},
+    {"mpr-17751.21", 0xED87AC62, Polygons, 0x400002, 0x200000},
+    {"mpr-17753.25", 0x6DB0EB36, Textures, 0x000000, 0x200000},
+    {"mpr-17752.24", 0xD6AA86CE, Textures, 0x000002, 0x200000},
+    {"opr-14742a.45", 0x90C6B117, CoproTables, 0x000000, 0x020000},
+    {"opr-14743a.46", 0xAE7F446B, CoproTables, 0x000002, 0x020000},
+    {"epr-17890.30", 0x5BAC3FA1, SoundProgram, 0x000000, 0x040000},
+    {"mpr-17756.31", 0x7725F111, Pcm1, 0x000000, 0x200000},
+    {"mpr-17757.32", 0x1616E649, Pcm1, 0x200000, 0x200000},
+    {"mpr-17886.36", 0x54A72923, Pcm2, 0x000000, 0x200000},
+    {"mpr-17887.37", 0x38C31FDD, Pcm2, 0x200000, 0x200000},
+};
+
 // Per set: its files; main_data's ROM_COPY source (copied to every 1 MB
 // from there up to 0xF00000); where the TGP program the i960 uploads at
 // boot sits in main_data (found by matching MAME's upload; the same 2,024
-// words in both sets, checked by CRC).
+// words in both sets, checked by CRC); and whether the board has a TGP at
+// all (Model 2A sets, such as Sega Rally, do not).
 struct Set {
     const char *name;
     const Load *loads;
     size_t count;
     uint32_t mirror_from, tgp_offset;
+    bool has_tgp = true;
 };
 constexpr uint32_t kTgpWords = 2024, kTgpCrc = 0xD6D611DDu;
 const Set kSets[] = {
-    {"daytona93", kDaytona93, std::size(kDaytona93), 0x900000, 0x860020},
-    {"daytona", kDaytona, std::size(kDaytona), 0x800000, 0x800020},
+    {"daytona93", kDaytona93, std::size(kDaytona93), 0x900000, 0x860020, true},
+    {"daytona", kDaytona, std::size(kDaytona), 0x800000, 0x800020, true},
+    {"srallyc", kSrallycb, std::size(kSrallycb), 0xF00000, 0x000000, false},
 };
 
 const Set &this_set() {
@@ -177,6 +210,12 @@ const char *rom_set_name() { return M2_ROMSET; }
 
 std::vector<uint8_t> tgp_program(const M2Board::Images &img) {
     const Set &set = this_set();
+    if (!set.has_tgp) { // Model 2A (Sega Rally): the 1,665-word program the i960 uploads sits in its own program ROM
+        constexpr uint32_t kRallyOffset = 372372, kRallyWords = 1665, kRallyCrc = 0x072484B1u;
+        const uint8_t *q = img.program.data() + kRallyOffset;
+        if (crc32(q, kRallyWords * 4) != kRallyCrc) throw ZipError("TGP program not where expected");
+        return {q, q + kRallyWords * 4};
+    }
     const uint8_t *p = img.main_data.data() + set.tgp_offset;
     if (crc32(p, kTgpWords * 4) != kTgpCrc) throw ZipError("TGP program not where expected");
     return {p, p + kTgpWords * 4};

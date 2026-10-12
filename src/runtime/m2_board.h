@@ -111,6 +111,8 @@ public:
     TgpBoard &tgp() { return tgp_; }
     // Bytes sent to the sound board since the last take.
     std::vector<uint8_t> take_sound_bytes() { sound_total_ += uart_out_.size(); return std::exchange(uart_out_, {}); }
+    // Bytes the sound board sent back on its MIDI output: the i8251's receive side.
+    void sound_reply(const std::vector<uint8_t> &bytes);
     uint64_t sound_bytes_total() const { return sound_total_ + uart_out_.size(); }
     std::vector<uint8_t> &backup_ram() { return backup_; }
     // Link play: the communication board on a host transport (CommBoard;
@@ -155,6 +157,7 @@ private:
     void tex_write(const Page &p, uint32_t addr, uint32_t lane_data);
 
     void irq_update();
+    void timer_expire(int n);
     void uart_write_data(uint8_t v);
     void uart_txrdy(bool state);
 
@@ -180,7 +183,9 @@ private:
 
     uint32_t intreq_ = 0, intena_ = 0;
     int8_t lines_[4] = {-1, -1, -1, -1};
-    uint32_t timervals_[4] = {0, 0, 0, 0};
+    uint32_t timervals_[4] = {0xfffff, 0xfffff, 0xfffff, 0xfffff};
+    bool timerrun_[4] = {false, false, false, false};
+    uint64_t timer_gen_[4] = {0, 0, 0, 0};
     uint32_t videocontrol_ = 0, zclip_ = 0;
     bool render_mode_ = false, render_test_ = false, render_unk_ = false;
     uint8_t comm_cn_ = 0, comm_fg_ = 0;
@@ -208,6 +213,7 @@ private:
     bool uart_txrdy_ = true, uart_shift_busy_ = false, uart_have_hold_ = false;
     uint8_t uart_hold_ = 0;
     std::vector<uint8_t> uart_out_;
+    std::deque<uint8_t> uart_rx_;
     uint64_t sound_total_ = 0;
     void uart_shift_done();
 };

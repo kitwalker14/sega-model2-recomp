@@ -12,6 +12,7 @@
 #pragma once
 
 #include "runtime/multipcm.h"
+#include "runtime/scsp.h"
 #include "runtime/snd_gen_support.h"
 
 #include "ymfm_opn.h"
@@ -19,6 +20,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -33,7 +35,9 @@ public:
     static constexpr uint32_t kBaud = 31250;          // MIDI-rate serial line from the i960
     static constexpr uint32_t kByteBits = 10;         // start, 8 data, stop
 
-    SoundBoard(const std::vector<uint8_t> &program, const std::vector<uint8_t> &pcm1, const std::vector<uint8_t> &pcm2);
+    SoundBoard(const std::vector<uint8_t> &program, const std::vector<uint8_t> &pcm1, const std::vector<uint8_t> &pcm2,
+               bool scsp = false);
+    bool is_scsp() const { return scsp_; }
 
     // Command bytes the i960 wrote to its UART; they arrive one line-time
     // apart from now on.
@@ -43,10 +47,13 @@ public:
 
     // Rendered audio since the last take: interleaved stereo floats, already
     // at the board's mix gains (YM 0.30, each MultiPCM 0.50).
-    double fm_rate() const { return double(kYmClock) / 144; }
+    double fm_rate() const { return scsp_ ? Scsp::kRate : double(kYmClock) / 144; }
     double pcm_rate() const { return double(kPcmClock) / 224; }
-    std::vector<float> take_fm() { return std::exchange(fm_out_, {}); }
+    // Model 2A: the SCSP's stereo mix comes out of take_fm() (at scsp_rate()); take_pcm() is empty.
+    std::vector<float> take_fm() { return std::exchange(scsp_ ? scsp_out_ : fm_out_, {}); }
     std::vector<float> take_pcm() { return std::exchange(pcm_out_, {}); }
+    // Model 2A: the SCSP's stereo output at scsp_rate().
+    double scsp_rate() const { return Scsp::kRate; }
 
     uint64_t instructions() const { return sched_.count; }
     // The launcher's music and effects volumes (0..1; both 1: unchanged).
@@ -58,9 +65,13 @@ public:
     int voice_channel(unsigned chip, uint8_t slot) const;
     const std::vector<uint8_t> &ram() const { return cpu_.ram; } // the 68000's work RAM, 0xf00000 on (tests)
     size_t bytes_received() const { return received_; }
+    // Model 2A: bytes the 68000 sent back on the SCSP's MIDI output (the i960's UART receive line).
+    std::vector<uint8_t> take_reply_bytes() { std::lock_guard<std::mutex> g(reply_mu_); return std::exchange(reply_, {}); }
+    size_t reply_total() const { return reply_total_; }
 
     // Devices (the 68000's view)
     uint8_t read(uint32_t addr) override;
+    uint16_t read16(uint32_t addr) override;
     void write(uint32_t addr, uint16_t data) override;
 
     // ymfm_interface
@@ -70,10 +81,21 @@ private:
     void run_to(uint64_t count);
     void render_fm_to(uint64_t count);
     void render_pcm_to(uint64_t count);
-    uint64_t ym_clock_at(uint64_t count) const { return count * kYmClock / kIps; }
+    void render_scsp_to(uint64_t count);
+    uint64_t ym_clock_at(uint64_t count) const { return count * kYmClock / ips_; }
     void rx_arrive(uint8_t byte);
 
     std::vector<uint8_t> program_, pcm1_rom_, pcm2_rom_;
+    bool scsp_ = false;
+    std::vector<uint8_t> samples_;                 // Model 2A: pcm1 then pcm2, as MAME's "samples"
+    // 68000 instructions per second: the 11.2896 MHz SCSP board runs 1.1289x the Model 2 board's 10 MHz.
+    uint64_t ips_ = kIps;
+    std::unique_ptr<Scsp> scsp_dev_;
+    uint64_t scsp_done_ = 0;
+    std::mutex reply_mu_;
+    std::vector<uint8_t> reply_;
+    size_t reply_total_ = 0;
+    std::vector<float> scsp_out_;
     Cpu68k cpu_;
     Sched sched_{cpu_};
     sndgen::Env env_{cpu_, sched_};

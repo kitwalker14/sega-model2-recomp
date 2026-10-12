@@ -20,7 +20,7 @@
 namespace {
 void write(const std::string &path, const uint8_t *p, size_t n) {
     std::ofstream f(path, std::ios::binary);
-    if (!f.write(reinterpret_cast<const char *>(p), std::streamsize(n))) throw std::runtime_error("cannot write " + path);
+    if (n && !f.write(reinterpret_cast<const char *>(p), std::streamsize(n))) throw std::runtime_error("cannot write " + path);
 }
 } // namespace
 

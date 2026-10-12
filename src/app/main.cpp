@@ -325,7 +325,9 @@ int main(int argc, char **argv) {
                 native_audio.volumes(cfg.music_volume, cfg.effects_volume);
                 native_audio.mute(cfg.mute);
             } else if (audio_initialized) {
-                have_audio = audio.open(snd::SoundBoard::kYmClock / 144.0, snd::SoundBoard::kPcmClock / 224.0);
+                const bool scsp_board = images.sound_program.size() > 5 && images.sound_program[5] == 0x60;
+                have_audio = scsp_board ? audio.open(snd::Scsp::kRate, snd::Scsp::kRate)
+                                        : audio.open(snd::SoundBoard::kYmClock / 144.0, snd::SoundBoard::kPcmClock / 224.0);
                 if (!have_audio) std::fprintf(stderr, "daytona: reference audio unavailable (%s)\n", SDL_GetError());
             }
             game = std::make_unique<rt::GameLoop>(std::move(images), !native_active);

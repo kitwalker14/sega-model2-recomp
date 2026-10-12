@@ -27,6 +27,8 @@ public:
     virtual ~Devices() = default;
     virtual uint8_t read(uint32_t addr) = 0;
     virtual void write(uint32_t addr, uint16_t data) = 0;
+    // A 16-bit register read (SCSP: one access, one set of read side effects).
+    virtual uint16_t read16(uint32_t addr) { return uint16_t(read(addr) << 8 | read(addr + 1)); }
 };
 
 struct Cpu68k {
@@ -40,6 +42,50 @@ struct Cpu68k {
     std::vector<uint8_t> ram = std::vector<uint8_t>(0x10000, 0); // 0xf00000-0xf0ffff
     const uint8_t *rom = nullptr;   // 0x000000-0x03ffff, big-endian bytes; 0x080000-0x09ffff mirrors 0x020000
     Devices *dev = nullptr;
+
+    // Model 2A sound board (68000 + SCSP): RAM at 0 (512K), SCSP registers at
+    // 0x100000, program ROM at 0x600000, sample ROM from 0x800000. Device
+    // accesses: 16-bit reads/writes use the even address; 8-bit writes pass the
+    // byte address and the value in the low byte.
+    bool scsp = false;
+    std::vector<uint8_t> sram;      // 0x80000
+    const uint8_t *samples = nullptr;
+    uint32_t samples_size = 0;
+
+    const uint8_t *smp(uint32_t addr) const {
+        uint32_t o;
+        if (addr >= 0x800000 && addr < 0xa00000) o = addr - 0x800000;
+        else if (addr >= 0xa00000 && addr < 0xe00000) o = 0x200000 + (addr - 0xa00000);
+        else o = 0x600000 + (addr - 0xe00000);
+        return o + 1 < samples_size ? samples + o : nullptr;
+    }
+    uint8_t scsp_r8(uint32_t addr) {
+        if (addr < 0x80000) return sram[addr];
+        if (addr >= 0x100000 && addr < 0x101000) { const uint16_t w = dev->read16(addr & ~1u); return uint8_t(addr & 1 ? w : w >> 8); }
+        if (addr >= 0x600000 && addr < 0x640000) return rom[addr - 0x600000];
+        if (addr >= 0x800000) { const uint8_t *p = smp(addr); return p ? *p : 0; }
+        return 0;
+    }
+    uint16_t scsp_r16(uint32_t addr) {
+        if (addr < 0x80000) return uint16_t(sram[addr] << 8 | sram[addr + 1]);
+        if (addr >= 0x100000 && addr < 0x101000) return dev->read16(addr);
+        if (addr >= 0x600000 && addr < 0x640000) return uint16_t(rom[addr - 0x600000] << 8 | rom[addr - 0x600000 + 1]);
+        if (addr >= 0x800000) { const uint8_t *p = smp(addr); return p ? uint16_t(p[0] << 8 | p[1]) : 0; }
+        return 0;
+    }
+    void scsp_w8(uint32_t addr, uint32_t val) {
+        if (addr < 0x80000) sram[addr] = uint8_t(val);
+        else if (addr >= 0x100000 && addr < 0x101000) { // read-modify-write as a 16-bit register access
+            const uint32_t e = addr & ~1u;
+            uint16_t w = dev->read16(e);
+            w = addr & 1 ? uint16_t((w & 0xff00) | (val & 0xff)) : uint16_t((w & 0x00ff) | (val & 0xff) << 8);
+            dev->write(e, w);
+        }
+    }
+    void scsp_w16(uint32_t addr, uint32_t val) {
+        if (addr < 0x80000) { sram[addr] = uint8_t(val >> 8); sram[addr + 1] = uint8_t(val); }
+        else if (addr >= 0x100000 && addr < 0x101000) dev->write(addr, uint16_t(val));
+    }
 
     // Reset: SSP and PC from the vector table, supervisor, mask 7.
     void reset();
@@ -55,6 +101,7 @@ struct Cpu68k {
     // Memory: 24-bit bus.
     uint8_t r8(uint32_t addr) {
         addr &= 0xffffff;
+        if (scsp) return scsp_r8(addr);
         if (addr >= 0xf00000 && addr < 0xf10000) return ram[addr - 0xf00000];
         if (addr < 0x40000) return rom[addr];
         if (addr >= 0x80000 && addr < 0xa0000) return rom[addr - 0x60000];
@@ -63,6 +110,7 @@ struct Cpu68k {
     uint16_t r16(uint32_t addr) {
         addr &= 0xffffff;
         if (addr & 1) odd(addr);
+        if (scsp) return scsp_r16(addr);
         if (addr >= 0xf00000 && addr < 0xf10000) return uint16_t(ram[addr - 0xf00000] << 8 | ram[addr - 0xf00000 + 1]);
         if (addr < 0x40000) return uint16_t(rom[addr] << 8 | rom[addr + 1]);
         if (addr >= 0x80000 && addr < 0xa0000) return uint16_t(rom[addr - 0x60000] << 8 | rom[addr - 0x60000 + 1]);
@@ -71,12 +119,14 @@ struct Cpu68k {
     uint32_t r32(uint32_t addr) { return uint32_t(r16(addr)) << 16 | r16(addr + 2); }
     void w8(uint32_t addr, uint32_t val) {
         addr &= 0xffffff;
+        if (scsp) { scsp_w8(addr, val); return; }
         if (addr >= 0xf00000 && addr < 0xf10000) ram[addr - 0xf00000] = uint8_t(val);
         else dev_w(addr, uint16_t(addr & 1 ? (val & 0xff) : (val & 0xff) << 8), addr & 1 ? 0x00ff : 0xff00);
     }
     void w16(uint32_t addr, uint32_t val) {
         addr &= 0xffffff;
         if (addr & 1) odd(addr);
+        if (scsp) { scsp_w16(addr, val); return; }
         if (addr >= 0xf00000 && addr < 0xf10000) {
             ram[addr - 0xf00000] = uint8_t(val >> 8);
             ram[addr - 0xf00000 + 1] = uint8_t(val);

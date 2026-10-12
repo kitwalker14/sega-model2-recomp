@@ -187,6 +187,45 @@ struct Emitter {
         auto two = [&](const std::string &v) { // read both sources first, as MAME does
             body += "{ const uint32_t t1 = " + s1(in) + ", t2 = " + s2(in) + "; " + d + " = " + v + "; }";
         };
+        // Real (FP) operands. A single-precision operand with its mode bit set
+        // names fp0-fp3 or an FP literal (+0.0 / +1.0); otherwise the register
+        // holds the value's bit pattern. Mirrors refcore get_1_rif/... .
+        auto fp_val = [&](bool mode, uint8_t idx) -> std::string {
+            if (mode) {
+                if ((idx & 0x1f) < 4) return "c.m_fp[" + std::to_string(idx & 3) + "]";
+                return idx == 0x16 ? "1.0" : "0.0";
+            }
+            return "double(gen::u2f(" + R(idx) + "))";
+        };
+        // Long-real operand: an even/odd register pair read as one 64-bit value.
+        auto rfl_val = [&](bool mode, uint8_t idx) -> std::string {
+            if (mode) {
+                if ((idx & 0x1f) < 4) return "c.m_fp[" + std::to_string(idx & 3) + "]";
+                return idx == 0x16 ? "1.0" : "0.0";
+            }
+            const unsigned e = idx & 0x1e;
+            return "rt::u2d(uint64_t(" + R(e) + ") | (uint64_t(" + R(e + 1) + ") << 32))";
+        };
+        auto rf1 = [&]() { return fp_val(in.m1, in.src1); };
+        auto rf2 = [&]() { return fp_val(in.m2, in.src2); };
+        auto rfl1 = [&]() { return rfl_val(in.m1, in.src1); };
+        auto rfl2 = [&]() { return rfl_val(in.m2, in.src2); };
+        // Write a real result: register/literal dst (mode clear) or fp0-fp3.
+        auto set_rif = [&](const std::string &v) -> bool {
+            if (!in.m3) { set("gen::f2u(float(" + v + "))"); return true; }
+            if ((in.dst & 0x1f) < 4) { body += "c.m_fp[" + std::to_string(in.dst & 3) + "] = " + v + ";"; return true; }
+            return false;
+        };
+        auto set_rifl = [&](const std::string &v) -> bool {
+            if (!in.m3) {
+                const unsigned e = in.dst & 0x1e;
+                body += "{ const uint64_t p = rt::d2u(double(" + v + ")); " + R(e) + " = uint32_t(p); " +
+                        R(e + 1) + " = uint32_t(p >> 32); }";
+                return true;
+            }
+            if ((in.dst & 0x1f) < 4) { body += "c.m_fp[" + std::to_string(in.dst & 3) + "] = " + v + ";"; return true; }
+            return false;
+        };
         const uint32_t tgt = in.target, tgt_masked = in.target & ~3u; // bxx/bxx_s mask the target, b/bal/call/bbc/bbs do not
 
         switch (in.fmt) {
@@ -327,6 +366,7 @@ struct Emitter {
             case 0x655: body = "{ const uint32_t t1 = c.m_PC, t2 = " + s2(in) + "; c.m_PC = (c.m_PC & ~t2) | (" + d + " & t2); " + d +
                                " = t1; c.m_IP = " + hex(next) + "; if ((t1 >> 16 & 0x1f) > (c.m_PC >> 16 & 0x1f)) c.check_pending_irqs(); }";
                         exit = "if (c.m_IP != " + hex(next) + ") goto dispatch;"; break; // modpc
+            case 0x66d: body = "c.flushreg();"; break;                    // flushreg
             case 0x670: body = "{ const uint64_t p = uint64_t(" + s1(in) + ") * uint64_t(" + s2(in) + "); " + d + " = uint32_t(p); " +
                                R(in.dst + 1) + " = uint32_t(p >> 32); }"; break; // emul
             case 0x671: {                                                  // ediv
@@ -336,16 +376,42 @@ struct Emitter {
                        d + " = rem; " + R(in.dst + 1) + " = quo; }";
                 break;
             }
-            case 0x674: if (in.m3) return unsupported(in);                  // cvtir: integer src1, real dst
-                        set("gen::f2u(float(double(int32_t(" + s1(in) + "))))"); break;
-            case 0x677: if (in.m2 || in.m3) return unsupported(in);         // scaler: integer src1, real src2/dst
-                        set("gen::f2u(float(double(gen::u2f(" + R(in.src2) + ")) * std::pow(2.0, double(int32_t(" + s1(in) + ")))))"); break;
-            case 0x685: if (in.m1 || in.m2) return unsupported(in);         // cmpr
-                        body = "AC = (AC & ~7u) | gen::cc_d(double(gen::u2f(" + R(in.src1) + ")), double(gen::u2f(" + R(in.src2) + ")));"; break; // cmpr
-            case 0x6c0: if (in.m1) return unsupported(in);                  // cvtri: real src1, integer dst
-                        set("uint32_t(int32_t(gen::round_to_int(double(gen::u2f(" + R(in.src1) + ")), AC)))"); break; // cvtri
-            case 0x6c2: if (in.m1) return unsupported(in);                  // cvtzri
-                        set("uint32_t(int32_t(double(gen::u2f(" + R(in.src1) + "))))"); break; // cvtzri
+            case 0x674: if (!set_rif("double(int32_t(" + s1(in) + "))")) return unsupported(in); break; // cvtir: integer src1, real dst
+            case 0x675: if (!set_rifl("double(int32_t(" + s1(in) + "))")) return unsupported(in); break; // cvtilr
+            case 0x676: if (!set_rifl(rfl2() + " * std::pow(2.0, double(int32_t(" + s1(in) + ")))")) return unsupported(in); break; // scalerl
+            case 0x677: if (!set_rif(rf2() + " * std::pow(2.0, double(int32_t(" + s1(in) + ")))")) return unsupported(in); break; // scaler
+            case 0x685: body = "AC = (AC & ~7u) | gen::cc_d(" + rf1() + ", " + rf2() + ");"; break; // cmpr
+            case 0x68a: if (!set_rif("std::logb(" + rf1() + ")")) return unsupported(in); break; // logbnr
+            case 0x68b: if (!set_rif("double(gen::round_to_int(" + rf1() + ", AC))")) return unsupported(in); break; // roundr
+            case 0x69a: if (!set_rifl("std::logb(" + rfl1() + ")")) return unsupported(in); break; // logbnrl
+            case 0x69b: if (!set_rifl("double(gen::round_to_int(" + rfl1() + ", AC))")) return unsupported(in); break; // roundrl
+            case 0x6c0: set("uint32_t(int32_t(gen::round_to_int(" + rf1() + ", AC)))"); break; // cvtri
+            case 0x6c1: body = "{ const int64_t v = int64_t(gen::round_to_int(" + rf1() + ", AC)); " + d + " = uint32_t(v); " + R(in.dst + 1) + " = uint32_t(uint64_t(v) >> 32); }"; break; // cvtril
+            case 0x6c2: set("uint32_t(int32_t(" + rf1() + "))"); break; // cvtzri
+            case 0x6c3: body = "{ const int64_t v = int64_t(" + rf1() + "); " + d + " = uint32_t(v); " + R(in.dst + 1) + " = uint32_t(uint64_t(v) >> 32); }"; break; // cvtzril
+            case 0x6c9: if (!set_rif(rf1())) return unsupported(in); break; // movr: real src1 -> real dst
+            case 0x6d9: if (!set_rifl(rfl1())) return unsupported(in); break; // movrl: long src1 -> long dst
+            case 0x680: if (!set_rif("std::atan2(" + rf2() + ", " + rf1() + ")")) return unsupported(in); break; // atanr
+            case 0x681: if (!set_rif(rf2() + " * std::log2(" + rf1() + " + 1.0)")) return unsupported(in); break; // logepr
+            case 0x682: if (!set_rif(rf2() + " * std::log2(" + rf1() + ")")) return unsupported(in); break; // logr
+            case 0x683: if (!set_rif("std::fmod(" + rf2() + ", " + rf1() + ")")) return unsupported(in); break; // remr
+            case 0x688: if (!set_rif("std::sqrt(" + rf1() + ")")) return unsupported(in); break; // sqrtr
+            case 0x689: if (!set_rif("std::exp2(" + rf1() + ") - 1.0")) return unsupported(in); break; // expr
+            case 0x68c: if (!set_rif("std::sin(" + rf1() + ")")) return unsupported(in); break; // sinr
+            case 0x68d: if (!set_rif("std::cos(" + rf1() + ")")) return unsupported(in); break; // cosr
+            case 0x68e: if (!set_rif("std::tan(" + rf1() + ")")) return unsupported(in); break; // tanr
+            case 0x690: if (!set_rifl("std::atan2(" + rfl2() + ", " + rfl1() + ")")) return unsupported(in); break; // atanrl
+            case 0x692: if (!set_rifl(rfl2() + " * std::log2(" + rfl1() + ")")) return unsupported(in); break; // logrl
+            case 0x693: if (!set_rifl("std::fmod(" + rfl2() + ", " + rfl1() + ")")) return unsupported(in); break; // remrl
+            case 0x695: body = "AC = (AC & ~7u) | gen::cc_d(" + rfl1() + ", " + rfl2() + ");"; break; // cmprl
+            case 0x698: if (!set_rifl("std::sqrt(" + rfl1() + ")")) return unsupported(in); break; // sqrtrl
+            case 0x699: if (!set_rifl("std::exp2(" + rfl1() + ") - 1.0")) return unsupported(in); break; // exprl
+            case 0x69c: if (!set_rifl("std::sin(" + rfl1() + ")")) return unsupported(in); break; // sinrl
+            case 0x69d: if (!set_rifl("std::cos(" + rfl1() + ")")) return unsupported(in); break; // cosrl
+            case 0x69e: if (!set_rifl("std::tan(" + rfl1() + ")")) return unsupported(in); break; // tanrl
+            case 0x6e2: body = "{ const double _a = std::fabs(" + rfl1() + "); if (" + rfl2() + " >= 0.0) { "; if (!set_rifl("_a")) return unsupported(in); body += " } else { "; if (!set_rifl("-_a")) return unsupported(in); body += " } }"; break; // cpysre
+            case 0x5b0: body = "{ const uint32_t t1 = " + s1(in) + ", t2 = " + s2(in) + "; const uint64_t res = uint64_t(t2) + uint64_t(t1) + uint64_t((AC >> 1) & 1u); " + d + " = uint32_t(res); AC = (AC & ~3u) | ((res >> 32 != 0) ? 2u : 0u) | (((((uint32_t(res) ^ t1) & (uint32_t(res) ^ t2)) & 0x80000000u) != 0) ? 1u : 0u); }"; break; // addc
+            case 0x5b2: body = "{ const uint32_t t1 = " + s1(in) + ", t2 = " + s2(in) + "; const uint64_t res = uint64_t(t2) + uint64_t(uint32_t(~t1)) + uint64_t((AC >> 1) & 1u); " + d + " = uint32_t(res); AC = (AC & ~7u) | ((res >> 32 != 0) ? 2u : 0u) | ((((t2 ^ t1) & (t2 ^ uint32_t(res)) & 0x80000000u) != 0) ? 1u : 0u); }"; break; // subc
             case 0x701: two("t2 * t1"); break;                             // mulo
             case 0x708: two("t2 % t1"); break;                             // remo (MAME: undefined on 0)
             case 0x70b: two("t1 == 0 ? 0u : t2 / t1"); break;              // divo (MAME: 0 on divide by zero)
@@ -354,10 +420,14 @@ struct Emitter {
             case 0x749: two("uint32_t([](int32_t a, int32_t b) { int32_t r = a - (a / b) * b; "
                             "if ((b ^ a) < 0 && r != 0) r += b; return r; }(int32_t(t2), int32_t(t1)))"); break; // modi (sign of src1)
             case 0x74b: two("uint32_t(int32_t(t2) / int32_t(t1))"); break; // divi
-            case 0x78d: if (in.m1 || in.m2 || in.m3) return unsupported(in); // subr: reals in registers (MAME: double, then float)
-                        set("gen::f2u(float(double(gen::u2f(" + R(in.src2) + ")) - double(gen::u2f(" + R(in.src1) + "))))"); break;
-            case 0x78f: if (in.m1 || in.m2 || in.m3) return unsupported(in); // addr
-                        set("gen::f2u(float(double(gen::u2f(" + R(in.src2) + ")) + double(gen::u2f(" + R(in.src1) + "))))"); break;
+            case 0x78b: if (!set_rif(rf2() + " / " + rf1())) return unsupported(in); break; // divr
+            case 0x78c: if (!set_rif(rf2() + " * " + rf1())) return unsupported(in); break; // mulr
+            case 0x78d: if (!set_rif(rf2() + " - " + rf1())) return unsupported(in); break; // subr: reals in registers (MAME: double, then float)
+            case 0x78f: if (!set_rif(rf2() + " + " + rf1())) return unsupported(in); break; // addr
+            case 0x79b: if (!set_rifl(rfl2() + " / " + rfl1())) return unsupported(in); break; // divrl
+            case 0x79c: if (!set_rifl(rfl2() + " * " + rfl1())) return unsupported(in); break; // mulrl
+            case 0x79d: if (!set_rifl(rfl2() + " - " + rfl1())) return unsupported(in); break; // subrl
+            case 0x79f: if (!set_rifl(rfl2() + " + " + rfl1())) return unsupported(in); break; // addrl
             default: return unsupported(in);
             }
             break;
@@ -434,6 +504,8 @@ std::vector<uint32_t> load_seeds(const std::string &path) {
 } // namespace
 
 int main(int argc, char **argv) {
+    // Code the game copies from ROM into RAM and runs there (Sega Rally: ROM 0x1000.. -> 0x5a0000).
+    uint32_t ov_base = 0, ov_off = 0, ov_size = 0;
     if (argc < 3) {
         std::fprintf(stderr, "usage: m2recomp PROGRAM.bin OUTDIR [--seeds FILE]... [--hooks FILE] [--chunk N] [--fast_inaccuracy]\n");
         return 2;
@@ -449,6 +521,10 @@ int main(int argc, char **argv) {
             seeds.insert(seeds.end(), s.begin(), s.end());
         } else if (!std::strcmp(argv[i], "--hooks") && i + 1 < argc) {
             load_hooks(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--ram-overlay") && i + 1 < argc) { // BASE:ROMOFF:SIZE, hex
+            unsigned long b, o, z;
+            if (std::sscanf(argv[++i], "%lx:%lx:%lx", &b, &o, &z) != 3) { std::fprintf(stderr, "m2recomp: bad --ram-overlay\n"); return 2; }
+            ov_base = uint32_t(b), ov_off = uint32_t(o), ov_size = uint32_t(z);
         } else if (!std::strcmp(argv[i], "--chunk") && i + 1 < argc) {
             chunk = std::strtoul(argv[++i], nullptr, 0);
         } else if (!std::strcmp(argv[i], "--fast_inaccuracy")) {
@@ -465,6 +541,7 @@ int main(int argc, char **argv) {
         uint64_t off;
         if (a < img.size()) off = a;
         else if (a >= 0x220000 && a < 0x240000) off = a - 0x200000;
+        else if (ov_size && a >= ov_base && a - ov_base < ov_size) off = uint64_t(a - ov_base) + ov_off;
         else return std::nullopt;
         if (off + 4 > img.size()) return std::nullopt;
         uint32_t v;

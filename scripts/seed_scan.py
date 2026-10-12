@@ -55,7 +55,7 @@ def words(data):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--set", default="daytona93", choices=["daytona93", "daytona"])
+    ap.add_argument("--set", default="daytona93", choices=["daytona93", "daytona", "srallyc"])
     ap.add_argument("--build-dir", default="build")
     ap.add_argument("--config", default="Release")
     ap.add_argument("--append", action="store_true", help="add the new seeds to seeds/<set>.txt")
@@ -71,11 +71,17 @@ def main():
     img = open(prog_path, "rb").read()
 
     # Program ROM at 0, its upper 128 KiB mirrored at 0x220000 (as m2recomp).
+    ov = None
+    if args.set == "srallyc":  # ROM 0x1000.. copied to RAM 0x5a0000 and run there (as scripts/recompile.py)
+        ov = (0x5a0000, 0x1000, 0x60000)
+
     def off(a):
         if 0x800 <= a < len(img):
             return a
         if 0x220000 <= a < 0x240000:
             return a - 0x200000
+        if ov and ov[0] <= a < ov[0] + ov[2]:
+            return a - ov[0] + ov[1]
         return None
 
     def word(a):
@@ -124,7 +130,7 @@ def main():
             f.writelines("%08x\n" % a for a in seeds + found)
         gen = os.path.join(scratch, "gen")
         os.makedirs(gen)
-        r = subprocess.run([recomp, prog_path, gen, "--seeds", sf], capture_output=True, text=True)
+        r = subprocess.run([recomp, prog_path, gen, "--seeds", sf] + (["--ram-overlay", "5a0000:1000:60000"] if ov else []), capture_output=True, text=True)
         if r.returncode:
             sys.exit(r.stderr + "\nseed_scan: recompile failed in round %d" % rnd)
 
