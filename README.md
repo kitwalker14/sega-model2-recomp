@@ -1,14 +1,29 @@
-# Daytona USA static recompilation
+# Sega Model 2 static recompilation
 
-Daytona USA (Sega Model 2) rebuilt as native code: the game's i960 program
-and the TGP program it uploads are statically recompiled to portable C++,
-and the fixed-function hardware (geometrizer, rasterizer, tilemaps) is native
-C++. No interpreter, no emulation core. MAME is used only as a test oracle.
-See `docs/daytona-usa-recomp-design.md` and `HANDOFF.md`.
+Sega Model 2 arcade games rebuilt as native code: the game's i960 program,
+the TGP program it uploads and the sound-board 68000 are statically
+recompiled to portable C++, and the fixed-function hardware (geometrizer,
+rasterizer, tilemaps, sound chips) is native C++. No interpreter, no
+emulation core. MAME is used only as a test oracle.
+
+Supported games:
+
+| Game | Set | Hardware | Sound board |
+| --- | --- | --- | --- |
+| Daytona USA Deluxe '93 | `daytona93` | Model 2 | 68000 + YM3438 + 2x MultiPCM |
+| Daytona USA Revision A (1994) | `daytona` | Model 2 | 68000 + YM3438 + 2x MultiPCM |
+| Sega Rally Championship | `srallyc` | Model 2A | 68000 + SCSP (Yamaha YMF292) |
+
+This project is a fork of [alphanu1/daytona-arcade-recomp](https://github.com/alphanu1/daytona-arcade-recomp),
+which recompiled Daytona USA; the Sega Rally / Model 2A work is described in
+[docs/sega-rally-model2a.md](docs/sega-rally-model2a.md). See also
+`docs/daytona-usa-recomp-design.md` (the original Daytona design) and
+`HANDOFF.md`.
 
 No game data is in this repository. You need your own ROM set (a
-MAME-format `.zip` or `.7z`): `daytona93` (Daytona USA Deluxe '93) or
-`daytona` (Revision A, 1994), or both.
+MAME-format `.zip` or `.7z`) for each game you want: `daytona93`, `daytona`
+or `srallyc` (Sega Rally Championship, the set MAME calls `srallyc`). Each is
+built as its own game; other sets are rejected.
 
 ## Platforms
 
@@ -33,7 +48,9 @@ In short:
 1. Copy your ROM set into `roms/` in the project folder, named exactly after
    the set: `roms/daytona93.zip` (Daytona USA Deluxe '93) and/or
    `roms/daytona.zip` (Revision A, 1994), or `.7z`. Each is built as its own
-   game; other Daytona sets are rejected.
+   game; other Daytona sets are rejected. Sega Rally (`roms/srallyc.zip`) is
+   built with `scripts/recompile.py --set srallyc --build-dir build-srallyc`;
+   see [docs/sega-rally-model2a.md](docs/sega-rally-model2a.md).
 2. Run setup. Linux or macOS:
 
        ./setup.sh

@@ -1,5 +1,8 @@
 # Daytona USA (Model 2) Static Recompilation — Design Document
 
+> Written for Daytona USA. The same design now also builds Sega Rally
+> Championship (Model 2A); see [sega-rally-model2a.md](sega-rally-model2a.md).
+
 Sep 24, 2026 · Ben
 
 ## Overview & goals

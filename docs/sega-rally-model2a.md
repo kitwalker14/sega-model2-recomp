@@ -1,7 +1,9 @@
 # Sega Rally Championship (Model 2A) port
 
-This fork adds the Sega Rally Championship (`srallyc`, Model 2A) to the
-Daytona USA recompilation. It uses the same approach as upstream: the i960
+This project (a fork of the Daytona USA recompilation, now covering Sega
+Model 2 games generally) supports Daytona USA (`daytona93`, `daytona`; Model 2)
+and Sega Rally Championship (`srallyc`; Model 2A). This document covers what
+was added for Sega Rally. It uses the same approach as upstream: the i960
 main CPU, the TGP (MB86233) and the sound 68000 are recompiled ahead of time
 from the user's own ROM set into native C++. No ROM bytes or generated code
 are committed; only seed lists (address lists we derived) are.

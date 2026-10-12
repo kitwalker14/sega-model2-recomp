@@ -1,13 +1,19 @@
 # Getting started
 
+This project recompiles Sega Model 2 games: Daytona USA (`daytona93`,
+`daytona`) and Sega Rally Championship (`srallyc`, Model 2A). The steps
+below build Daytona; Sega Rally has its own section in
+[sega-rally-model2a.md](sega-rally-model2a.md).
+
 From nothing to playing, on Windows, macOS or Linux. Setup installs what it
 needs, downloads the libraries, recompiles the game from your ROM set and
 builds it. You run one command; it takes a while the first time.
 
 ## What you need
 
-1. **Your own Daytona USA ROM set**, as a `.zip` or `.7z`, one of these
-   two (or both: each is built as its own game). No game data comes with
+1. **Your own ROM set**, as a `.zip` or `.7z`: Daytona USA (the two sets
+   below, or both: each is built as its own game) or Sega Rally Championship
+   (`srallyc`, see [sega-rally-model2a.md](sega-rally-model2a.md)). No game data comes with
    this project: the game is built from your copy.
 
    - **`daytona93`**: *Daytona USA Deluxe '93*, the set MAME calls
@@ -37,8 +43,8 @@ builds it. You run one command; it takes a while the first time.
 
 Open a terminal (PowerShell on Windows, Terminal on macOS) and run:
 
-    git clone https://github.com/alphanu1/daytona-arcade-recomp.git
-    cd daytona-arcade-recomp
+    git clone https://github.com/kitwalker14/sega-model2-recomp.git
+    cd sega-model2-recomp
 
 Stay in this folder for every command below.
 
@@ -48,7 +54,7 @@ Make a folder called `roms` inside the project and copy your set into it,
 named **exactly** after the set: `daytona93.zip` for Deluxe '93,
 `daytona.zip` for Revision A (or `.7z`). Both can be there.
 
-    daytona-arcade-recomp/
+    sega-model2-recomp/
         roms/
             daytona93.zip
             daytona.zip       (optional: Revision A, 1994)
