@@ -1,8 +1,9 @@
 // Force feedback: the drive board's state (rt::DriveBoard, from the game's
 // commands) on the host's wheel. A wheel with SDL haptics gets the board's
-// one effect at a time on its steering axis: a spring (centring, with or
-// without a dead zone, or uncentring as a negative spring), friction (the
-// board's resistance) or a constant force. A gamepad without haptics gets
+// native effects on its steering axis: a spring (centring, with or without a
+// dead zone, or uncentring as a negative spring), friction (the board's
+// resistance) or a constant force. Synthetic engine/road effects are additive
+// periodic layers with their own safety cap. A gamepad without haptics gets
 // rumble: the constant force on the large motor, uncentring on the small one;
 // the springs and resistance, on all race, give none. A wheel whose haptics
 // fail to open gets nothing, not rumble (on DirectInput, SDL's rumble is a
@@ -45,14 +46,21 @@ private:
     bool wants_haptic_ = false; // the device has force feedback but it is not open (yet): no rumble
     uint64_t retry_at_ = 0;     // SDL_GetTicks() when the haptic open is tried again
     bool reported_ = false;     // the open failure was logged
-    int spring_ = -1, friction_ = -1, constant_ = -1;
-    int sent_[3] = {-1, -1, -1}; // what each effect was last set to: only changes go to the device
+    int spring_ = -1, friction_ = -1, constant_ = -1, periodic_ = -1, road_ = -1;
+    float rpm_ = 0.0f;
+    float last_load_ = 0.0f, engine_output_ = 0.0f, road_output_ = 0.0f;
+    float engine_phase_ = 0.0f, road_phase_ = 0.0f;
+    uint64_t last_update_ms_ = 0;
+    float update_dt_ = 1.0f / 60.0f;
+    bool telemetry_stale_ = false;
+    int sent_[5] = {-1, -1, -1, -1, -1}; // only changed effects go to the device
     bool running_ = false, stopped_ = false, log_ = false;
     bool override_ = false; // centring worked out here, sent as constant force
     float wheel_ = 0.0f;    // the wheel's position, -1 left .. +1 right
     void open(SDL_Joystick *joy);
     void open_haptic();
     void apply(float strength, bool invert);
+    void reset_synthetic();
 };
 
 } // namespace app
