@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     // the name graphics overlays and drivers see (patches/sdl3: Vulkan's application name)
-    SDL_SetAppMetadata("Daytona USA", nullptr, "daytona-recomp");
+    SDL_SetAppMetadata(rt::game_title(), nullptr, "daytona-recomp");
 #ifdef M2_MOBILE
     // Mobile shells are landscape-only and always occupy the display.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
     constexpr int W = rt::GameLoop::kWidth, H = rt::GameLoop::kHeight;
     const int kMaxW = W + 2 * rt::GameLoop::wide_margin(app::Config::kMaxAspect);
     int screen_w = W; // this frame's width: W, or wider with widescreen
-    SDL_Window *window = SDL_CreateWindow("Daytona USA", W * 2, H * 2,
+    SDL_Window *window = SDL_CreateWindow(rt::game_title(), W * 2, H * 2,
                                           SDL_WINDOW_RESIZABLE | (cfg.fullscreen ? SDL_WINDOW_FULLSCREEN : 0));
     if (!window) return fail("SDL_CreateWindow");
     app::apply_fullscreen_mode(window, cfg.fullscreen_mode);

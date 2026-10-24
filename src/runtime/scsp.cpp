@@ -602,13 +602,21 @@ void Scsp::generate(float *lr, int n) {
             const u32 EG = (0x1f - (slot->EG.volume >> (EG_SHIFT + 5))) & 0x1f;
             latched_mslc_data_ = uint16_t((CA << 7) | (SGC << 5) | EG);
         }
-        const float gain = float(udata_[0] & 0xf) / 15.0f;
+        // The arcade's analog amp is louder than MAME's raw full-scale
+        // scaling (Sega Rally's mix peaks near -24 dBFS), so apply makeup
+        // gain, then tanh-limit so peaks never clip.
+        constexpr float kMakeup = 6.0f;
+        const float gain = kMakeup * float(udata_[0] & 0xf) / 15.0f;
+        auto out = [gain](int v, int lim, float scale) {
+            const float x = gain * float(std::clamp(v, -lim - 1, lim)) / scale;
+            return std::fabs(x) < 0.7f ? x : std::copysign(0.7f + 0.3f * std::tanh((std::fabs(x) - 0.7f) / 0.3f), x);
+        };
         if (udata_[0] & 0x100) {
-            lr[2 * s] = gain * float(std::clamp(smpl, -131072, 131071)) / 131072.0f;
-            lr[2 * s + 1] = gain * float(std::clamp(smpr, -131072, 131071)) / 131072.0f;
+            lr[2 * s] = out(smpl, 131071, 131072.0f);
+            lr[2 * s + 1] = out(smpr, 131071, 131072.0f);
         } else {
-            lr[2 * s] = gain * float(std::clamp(smpl >> 2, -32768, 32767)) / 32768.0f;
-            lr[2 * s + 1] = gain * float(std::clamp(smpr >> 2, -32768, 32767)) / 32768.0f;
+            lr[2 * s] = out(smpl >> 2, 32767, 32768.0f);
+            lr[2 * s + 1] = out(smpr >> 2, 32767, 32768.0f);
         }
     }
 }

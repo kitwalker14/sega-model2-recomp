@@ -223,11 +223,19 @@ rt::Inputs Controls::sample(const bool *keys, const Devices &d) {
     in.brake = uint8_t(std::lround(0x20 + std::clamp(brake, 0.f, 1.f) * 0xc0));
 
     // Gears: direct selection, or sequential shifts on the press
-    for (int g = 0; g < 4; g++)
-        if (value(Action(Gear1 + g), keys, d) > 0.5f) gear = g + 1;
+    // An H-pattern shifter's buttons are only down while a gear is in: between
+    // them (a shift) the gearbox is in neutral, as on the cabinet, so the game
+    // sees each shift instead of a gear jumping to another.
+    bool any_gear = false, joy_gear = false;
+    for (int g = 0; g < 4; g++) {
+        const Action a = Action(Gear1 + g);
+        if (bind[a].joy.kind != JoyInput::None && d.find(bind[a].joy.guid)) joy_gear = true;
+        if (value(a, keys, d) > 0.5f) { gear = g + 1; any_gear = true; direct_gear_ = true; }
+    }
+    if (joy_gear && direct_gear_ && !any_gear) gear = 0;
     for (Action a : {GearUp, GearDown}) {
         const bool now = value(a, keys, d) > 0.5f;
-        if (now && !held_[a]) gear = std::clamp(gear + (a == GearUp ? 1 : -1), 1, 4);
+        if (now && !held_[a]) { gear = std::clamp(gear + (a == GearUp ? 1 : -1), 1, 4); direct_gear_ = false; }
         held_[a] = now;
     }
     static const uint8_t gearvalue[5] = {0, 2, 1, 6, 5}; // MAME daytona_gearbox_r: neutral, 1-4

@@ -15,6 +15,7 @@
 #define M2_ROMSET "daytona93"
 #endif
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,12 @@ M2Board::Images import_rom_set(const std::string &zip_path);
 
 // The MAME name of the set this build was recompiled from.
 const char *rom_set_name();
+
+// Window / launcher title for this build's game.
+inline bool is_rally() { return std::strcmp(M2_ROMSET, "srallyc") == 0; }
+inline const char *game_title() {
+    return std::strcmp(M2_ROMSET, "srallyc") == 0 ? "Sega Rally Championship" : "Daytona USA";
+}
 
 // The TGP program the i960 uploads at boot, cut from main_data (CRC-checked).
 std::vector<uint8_t> tgp_program(const M2Board::Images &img);

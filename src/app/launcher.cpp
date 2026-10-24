@@ -1,3 +1,4 @@
+#include "runtime/rom_import.h"
 #include "app/launcher.h"
 #include "app/rom_file.h"
 #ifdef SDL_PLATFORM_IOS
@@ -239,7 +240,7 @@ Launcher::Result Launcher::draw(bool game_running, const Devices &devices) {
     }
 #endif
     ImGui::SetNextWindowBgAlpha(game_running ? 0.85f : 1.0f);
-    ImGui::Begin("Daytona USA", nullptr,
+    ImGui::Begin(rt::game_title(), nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PushTextWrapPos();

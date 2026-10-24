@@ -156,7 +156,10 @@ int main(int argc, char **argv) {
                 game.sound()->send(b.data(), b.size());
             }
             game.run_frame(script.at(game.board().frame()));
-            for (uint8_t c : std::exchange(game.board().io().drive_commands, {})) ++drive_commands, ++drive_kinds[c >> 4];
+            for (uint8_t c : std::exchange(game.board().io().drive_commands, {})) {
+                ++drive_commands, ++drive_kinds[c >> 4];
+                if (std::getenv("M2_DRIVE_TRACE")) std::printf("DRV f=%llu %02x\n", (unsigned long long)f, c);
+            }
             if (native) { // the app's native audio path, frame by frame
                 const auto bytes = game.board().take_sound_bytes();
                 const auto before = native->stats();

@@ -1,3 +1,4 @@
+#include "runtime/rom_import.h"
 #include "app/config.h"
 
 #include <algorithm>
@@ -73,7 +74,7 @@ void Config::load() {
 
 void Config::save() const {
     std::ofstream f(path());
-    f << "# Daytona USA launcher settings\n";
+    f << "# " << rt::game_title() << " launcher settings\n";
     f << "rom=" << rom_path << "\n";
     f << "gpu=" << gpu << "\n";
     f << "renderer=" << renderer << "\n";

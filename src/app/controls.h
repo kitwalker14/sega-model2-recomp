@@ -85,6 +85,7 @@ struct Controls {
     // Live values for the UI
     float steer = 0, accel = 0, brake = 0;
     int gear = 1;
+    bool direct_gear_ = false; // the last gear came from a gear button (an H-pattern gate), not a shift up/down
 private:
     bool held_[kNumActions] = {};
 };
