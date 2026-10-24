@@ -245,7 +245,7 @@ Launcher::Result Launcher::draw(bool game_running, const Devices &devices) {
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PushTextWrapPos();
 
-    ImGui::TextUnformatted("DAYTONA USA");
+    ImGui::TextUnformatted(rt::game_title());
     ImGui::SameLine();
     ImGui::TextDisabled("  static recompilation, native runtime");
     ImGui::Separator();
