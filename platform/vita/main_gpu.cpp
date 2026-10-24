@@ -340,9 +340,9 @@ void draw_menu(bool have_game, bool &options, int &selection, const VitaSettings
                const std::string &status, double fps) {
     ImGui::SetNextWindowPos({12, 12});
     ImGui::SetNextWindowSize({936, 520});
-    ImGui::Begin("Daytona USA", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
-    ImGui::Text("Daytona USA | %.1f FPS | CPU %d MHz | GPU %d MHz | %s", fps,
-                scePowerGetArmClockFrequency(), scePowerGetGpuClockFrequency(), kGfxApi);
+	ImGui::Begin(rt::game_title(), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+	ImGui::Text("%s | %.1f FPS | CPU %d MHz | GPU %d MHz | %s", rt::game_title(), fps,
+			scePowerGetArmClockFrequency(), scePowerGetGpuClockFrequency(), kGfxApi);
     if (ImGui::Button("Game")) { options = false; selection = 0; }
     ImGui::SameLine();
     if (ImGui::Button("Options")) { options = true; selection = 0; }
@@ -730,7 +730,8 @@ int main(int, char **) {
         gfx_begin();
         ui.frame(1.f / 60);
         ImGui::SetNextWindowPos({24, 24}); ImGui::SetNextWindowSize({912, 496});
-        ImGui::Begin("Starting Daytona USA", nullptr, ImGuiWindowFlags_NoDecoration);
+	const std::string starting_title = std::string("Starting ") + rt::game_title();
+	ImGui::Begin(starting_title.c_str(), nullptr, ImGuiWindowFlags_NoDecoration);
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::End(); ui.render();
         gfx_end();
