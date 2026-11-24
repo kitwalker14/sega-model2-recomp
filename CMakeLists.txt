@@ -366,6 +366,14 @@ add_executable(test_multipcm_volumes tests/test_multipcm_volumes.cpp src/runtime
 target_include_directories(test_multipcm_volumes PRIVATE src)
 add_test(NAME multipcm_volumes COMMAND test_multipcm_volumes)
 
+add_executable(test_drive_board tests/test_drive_board.cpp)
+target_include_directories(test_drive_board PRIVATE src)
+add_test(NAME drive_board COMMAND test_drive_board)
+
+add_executable(test_scsp tests/test_scsp.cpp src/runtime/scsp.cpp)
+target_include_directories(test_scsp PRIVATE src)
+add_test(NAME scsp COMMAND test_scsp)
+
 add_executable(test_app_pacing tests/test_app_pacing.cpp src/app/pacing.cpp)
 target_include_directories(test_app_pacing PRIVATE src)
 add_test(NAME app_pacing COMMAND test_app_pacing)

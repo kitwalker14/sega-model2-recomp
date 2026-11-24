@@ -50,6 +50,7 @@ struct Config {
     std::string link_next = "127.0.0.1:15113"; // host:port of the next cabinet
     bool link_framesync = false;         // hold every cabinet to the master's frame
     float ffb_strength = 0.7f; // force feedback (the drive board) on the steering device: 0 off .. 1
+    float ffb_vibration = 1.0f; // synthetic engine/road wheel vibration: 0 off .. 2 (200%)
     bool ffb_invert = false;   // turn the wheel the other way
     bool ffb_log = false;      // log the force feedback device, failures and the commands (daytona.log on Windows)
     bool ffb_centring_override = false; // Linux: the game's centring worked out here, sent as constant force (#16)

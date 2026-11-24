@@ -530,6 +530,12 @@ Launcher::Result Launcher::draw(bool game_running, const Devices &devices) {
                 cfg_.ffb_strength = float(ffb) / 100.0f;
                 cfg_.save();
             }
+            ImGui::SetNextItemWidth(200);
+            int vib = int(cfg_.ffb_vibration * 100.0f + 0.5f);
+            if (ImGui::SliderInt("Wheel vibration", &vib, 0, 200, vib ? "%d%%" : "Off")) {
+                cfg_.ffb_vibration = float(vib) / 100.0f;
+                cfg_.save();
+            }
             ImGui::SameLine();
             if (ImGui::Checkbox("Invert force", &cfg_.ffb_invert)) cfg_.save();
             ImGui::SameLine();

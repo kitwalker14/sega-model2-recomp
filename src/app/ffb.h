@@ -17,6 +17,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -36,6 +37,11 @@ public:
     void stop();  // the game paused: let the wheel go (the board's state is kept for resuming)
     void reset(); // a new game: stop, and the board as at power-on
     void close(); // release the device
+    // The engine's revs from the game (0 stopped .. 1 the limiter), before
+    // update(); without it the engine vibration follows the board's load.
+    void set_engine_rpm(float rpm) { telemetry_rpm_ = std::clamp(rpm, 0.0f, 1.0f), have_rpm_ = true; }
+    // The synthetic vibration layers, on top of the strength: 0 off .. 2.
+    void set_vibration(float vibration) { vibration_ = std::clamp(vibration, 0.0f, 2.0f); }
     const rt::DriveBoard &state() const { return drive_; }
     const char *device_kind() const; // what force feedback plays on, for the launcher
 
@@ -47,10 +53,11 @@ private:
     uint64_t retry_at_ = 0;     // SDL_GetTicks() when the haptic open is tried again
     bool reported_ = false;     // the open failure was logged
     int spring_ = -1, friction_ = -1, constant_ = -1, periodic_ = -1, road_ = -1;
-    float rpm_ = 0.0f;
-    float last_load_ = 0.0f, engine_output_ = 0.0f, road_output_ = 0.0f;
-    float engine_phase_ = 0.0f, road_phase_ = 0.0f;
-    uint64_t last_update_ms_ = 0;
+    float rpm_ = 0.0f, telemetry_rpm_ = 0.0f, last_rpm_ = 0.0f;
+    bool have_rpm_ = false;
+    float vibration_ = 1.0f;
+    float last_load_ = 0.0f, engine_output_ = 0.0f, road_output_ = 0.0f, shift_ = 0.0f;
+    uint64_t last_update_ms_ = 0, periodic_sent_ms_[2] = {0, 0};
     float update_dt_ = 1.0f / 60.0f;
     bool telemetry_stale_ = false;
     int sent_[5] = {-1, -1, -1, -1, -1}; // only changed effects go to the device

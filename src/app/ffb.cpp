@@ -35,31 +35,32 @@ struct VibrationProfile {
     float engine_idle_hz, engine_full_hz, road_low_hz, road_high_hz;
 };
 
-// Gains are fractions of the separate 5% synthetic overlay, not of the wheel's
-// full torque. Daytona has no RPM/speed telemetry, so load and board jolts are
-// bounded fallbacks rather than measured vehicle data.
-constexpr VibrationProfile kF1{0.04f, 0.14f, 0.06f, 0.12f, 0.18f, 0.20f, 0.25f,
-                               28.0f, 65.0f, 8.0f, 14.0f};
-constexpr VibrationProfile kNASCAR{0.08f, 0.18f, 0.12f, 0.12f, 0.16f, 0.14f, 0.25f,
-                                   18.0f, 45.0f, 6.0f, 12.0f};
-constexpr VibrationProfile kRally{0.05f, 0.13f, 0.08f, 0.15f, 0.18f, 0.28f, 0.30f,
-                                  22.0f, 55.0f, 7.0f, 18.0f};
-constexpr float kSyntheticCap = 0.05f;
-constexpr float kSyntheticSlew = 20.0f;
+// Gains are fractions of the wheel's full torque at strength 1, before the
+// overall synthetic cap. The engine follows the game's revs when provided,
+// else the board's load. Direct-drive bases soften anything much above 40 Hz,
+// so the engine stays in that range.
+constexpr VibrationProfile kNASCAR{0.10f, 0.25f, 0.14f, 0.0f, 0.18f, 0.22f, 0.35f,
+                                   16.0f, 38.0f, 6.0f, 12.0f};
+constexpr VibrationProfile kRally{0.08f, 0.25f, 0.16f, 0.0f, 0.20f, 0.30f, 0.35f,
+                                  18.0f, 40.0f, 7.0f, 18.0f};
+constexpr float kSyntheticCap = 0.40f;     // all synthetic layers together at vibration 1, of full torque
+constexpr float kSyntheticMax = 0.60f;     // the cap at any vibration setting
+constexpr float kSyntheticSlew = 6.0f;     // full torque per second
 constexpr uint64_t kSyntheticStaleMs = 250;
+constexpr uint64_t kPeriodicUpdateMs = 40; // between updates of a running vibration
 
 const VibrationProfile &vibration_profile(bool rally) {
     return rally ? kRally : kNASCAR;
 }
 
-void advance_phase(float &phase, float hz, float dt) {
-    phase += hz * dt;
-    phase -= std::floor(phase);
+// 96 steps up to the largest cap, so small changes don't reach the device.
+Sint16 quantize_magnitude(float output) {
+    const float stepped = std::round(std::clamp(output, 0.0f, kSyntheticMax) / kSyntheticMax * 96.0f) / 96.0f;
+    return Sint16(std::lround(stepped * kSyntheticMax * 0x7fff));
 }
 
-int periodic_key(Uint16 magnitude, Uint16 period, float phase) {
-    const int phase_key = std::clamp(int(phase * 255.0f), 0, 255);
-    return int(magnitude) | (int(period) << 16) | (phase_key << 24);
+int periodic_key(Uint16 magnitude, Uint16 period) {
+    return int(magnitude) | (int(period) << 16);
 }
 
 } // namespace
@@ -72,11 +73,10 @@ const char *ForceFeedback::device_kind() const {
 }
 
 void ForceFeedback::reset_synthetic() {
-    rpm_ = 0.0f;
+    rpm_ = telemetry_rpm_ = last_rpm_ = 0.0f;
     last_load_ = 0.0f;
-    engine_output_ = road_output_ = 0.0f;
-    engine_phase_ = road_phase_ = 0.0f;
-    last_update_ms_ = 0;
+    engine_output_ = road_output_ = shift_ = 0.0f;
+    last_update_ms_ = periodic_sent_ms_[0] = periodic_sent_ms_[1] = 0;
     update_dt_ = 1.0f / 60.0f;
     telemetry_stale_ = false;
 }
@@ -277,77 +277,69 @@ void ForceFeedback::apply(float strength, bool invert) {
         send(2, constant_, level, e);
     }
     {
+        // Synthetic vibration, added on top of the board's own effects: the
+        // engine (from the game's revs when provided, else the board's load),
+        // a kick on gear changes, and the road (load, its changes and impacts).
+        // Only the magnitude and period are sent, a few times a second at most:
+        // updating a running effect restarts its waveform on some drivers.
         const VibrationProfile &profile = vibration_profile(rt::is_rally());
-        const bool emergency_disable = std::getenv("M1_FFB_DISABLE_SYNTHETIC") != nullptr;
+        const bool emergency_disable = std::getenv("M2_FFB_DISABLE_SYNTHETIC") != nullptr ||
+                                       std::getenv("M1_FFB_DISABLE_SYNTHETIC") != nullptr;
         const float load = std::clamp(rt::is_rally() ? std::fabs(drive_.force()) : drive_.load(), 0.0f, 1.0f);
-        const bool playing = drive_.motor_on;
+        const bool playing = drive_.motor_on && !telemetry_stale_ && !emergency_disable && vibration_ > 0.0f;
+        const float gain = strength * vibration_;
         const float load_step = std::clamp(std::fabs(load - last_load_) * 8.0f, 0.0f, 1.0f);
         const float jolt = std::clamp(drive_.jolt, 0.0f, 1.0f);
         last_load_ = load;
-        const float engine_rpm = playing && !telemetry_stale_ ? load : 0.0f;
-        rpm_ += (engine_rpm - rpm_) * std::clamp(update_dt_ * 8.0f, 0.0f, 1.0f);
+        const float revs = have_rpm_ ? telemetry_rpm_ : load;
+        rpm_ += ((playing ? revs : 0.0f) - rpm_) * std::clamp(update_dt_ * 12.0f, 0.0f, 1.0f);
+        if (playing && have_rpm_ && last_rpm_ - telemetry_rpm_ > 0.08f)
+            shift_ = 1.0f; // the revs fell away: a gear change
+        else
+            shift_ = std::max(0.0f, shift_ - update_dt_ * 8.0f);
+        last_rpm_ = have_rpm_ ? telemetry_rpm_ : 0.0f;
         const float r = std::clamp(rpm_, 0.0f, 1.0f);
-        const float engine_fraction = playing && !telemetry_stale_
-            ? profile.idle_gain + (profile.rpm_gain - profile.idle_gain) * std::pow(r, 1.4f) : 0.0f;
-        const float road_fraction = playing && !telemetry_stale_
-            ? profile.rolling_gain * load + profile.rough_gain * load_step + profile.impact_gain * jolt : 0.0f;
-        const float total_fraction = engine_fraction + road_fraction;
-        const float normalize = total_fraction > 1.0f ? 1.0f / total_fraction : 1.0f;
-        const float target_engine = emergency_disable ? 0.0f : kSyntheticCap * strength * engine_fraction * normalize;
-        const float target_road = emergency_disable ? 0.0f : kSyntheticCap * strength * road_fraction * normalize;
+        const float target_engine = playing
+            ? gain * (profile.idle_gain + (profile.rpm_gain - profile.idle_gain) * r + profile.shift_gain * shift_) : 0.0f;
+        const float target_road = playing
+            ? gain * (profile.rolling_gain * load + profile.rough_gain * load_step + profile.impact_gain * jolt) : 0.0f;
         const float step = kSyntheticSlew * update_dt_;
         engine_output_ += std::clamp(target_engine - engine_output_, -step, step);
         road_output_ += std::clamp(target_road - road_output_, -step, step);
+        const float cap = std::min(kSyntheticMax, kSyntheticCap * gain);
         const float output_sum = engine_output_ + road_output_;
-        if (output_sum > kSyntheticCap * strength && output_sum > 0.0f) {
-            const float scale = kSyntheticCap * strength / output_sum;
+        if (output_sum > cap && output_sum > 0.0f) {
+            const float scale = cap / output_sum;
             engine_output_ *= scale;
             road_output_ *= scale;
         }
         const float engine_hz = profile.engine_idle_hz + (profile.engine_full_hz - profile.engine_idle_hz) * r;
         const float road_r = std::clamp(0.35f * load + 0.65f * load_step + 0.5f * jolt, 0.0f, 1.0f);
         const float road_hz = profile.road_low_hz + (profile.road_high_hz - profile.road_low_hz) * road_r;
-        if (playing && !telemetry_stale_) {
-            advance_phase(engine_phase_, engine_hz, update_dt_);
-            advance_phase(road_phase_, road_hz, update_dt_);
-        } else {
-            engine_phase_ = road_phase_ = 0.0f;
-        }
         const Uint16 engine_period = Uint16(std::clamp(int(std::lround(1000.0f / engine_hz)), 1, 1000));
         const Uint16 road_period = Uint16(std::clamp(int(std::lround(1000.0f / road_hz)), 1, 1000));
-        // SDL phases are hundredths of a degree, not a full Uint16 turn.
-        const Uint16 engine_phase = Uint16(std::lround(engine_phase_ * 36000.0f));
-        const Uint16 road_phase = Uint16(std::lround(road_phase_ * 36000.0f));
+        const uint64_t now = SDL_GetTicks();
+        auto send_periodic = [&](int layer, int slot, int id, float output, Uint16 period) {
+            const Sint16 magnitude = quantize_magnitude(output);
+            const int key = periodic_key(Uint16(magnitude), period);
+            if (id < 0 || sent_[slot] == key) return;
+            const bool silent = sent_[slot] < 0 || (sent_[slot] & 0xffff) == 0;
+            if (magnitude && !silent && now - periodic_sent_ms_[layer] < kPeriodicUpdateMs) return;
+            SDL_HapticEffect e{};
+            e.periodic.type = SDL_HAPTIC_SINE;
+            e.periodic.direction = steering_axis();
+            e.periodic.length = SDL_HAPTIC_INFINITY;
+            e.periodic.period = period;
+            e.periodic.magnitude = magnitude;
+            send(slot, id, key, e);
+            periodic_sent_ms_[layer] = now;
+        };
         if (road_ >= 0) {
-            SDL_HapticEffect engine{};
-            engine.periodic.type = SDL_HAPTIC_SINE;
-            engine.periodic.direction = steering_axis();
-            engine.periodic.length = SDL_HAPTIC_INFINITY;
-            engine.periodic.period = engine_period;
-            engine.periodic.phase = engine_phase;
-            engine.periodic.magnitude = Sint16(std::lround(engine_output_ * 0x7fff));
-            send(3, periodic_, periodic_key(Uint16(engine.periodic.magnitude), engine_period, engine_phase_), engine);
-
-            SDL_HapticEffect road{};
-            road.periodic.type = SDL_HAPTIC_SINE;
-            road.periodic.direction = steering_axis();
-            road.periodic.length = SDL_HAPTIC_INFINITY;
-            road.periodic.period = road_period;
-            road.periodic.phase = road_phase;
-            road.periodic.magnitude = Sint16(std::lround(road_output_ * 0x7fff));
-            send(4, road_, periodic_key(Uint16(road.periodic.magnitude), road_period, road_phase_), road);
+            send_periodic(0, 3, periodic_, engine_output_, engine_period);
+            send_periodic(1, 4, road_, road_output_, road_period);
         } else if (periodic_ >= 0) {
-            const bool use_road = road_output_ > engine_output_;
-            const Uint16 period = use_road ? road_period : engine_period;
-            const float phase = use_road ? road_phase_ : engine_phase_;
-            SDL_HapticEffect combined{};
-            combined.periodic.type = SDL_HAPTIC_SINE;
-            combined.periodic.direction = steering_axis();
-            combined.periodic.length = SDL_HAPTIC_INFINITY;
-            combined.periodic.period = period;
-            combined.periodic.phase = Uint16(std::lround(phase * 36000.0f));
-            combined.periodic.magnitude = Sint16(std::lround(std::min(kSyntheticCap * strength, output_sum) * 0x7fff));
-            send(3, periodic_, periodic_key(Uint16(combined.periodic.magnitude), period, phase), combined);
+            send_periodic(0, 3, periodic_, std::min(cap, output_sum),
+                          road_output_ > engine_output_ ? road_period : engine_period);
         }
     }
     if (!running_) {

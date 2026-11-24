@@ -58,6 +58,7 @@ void Config::load() {
         else if (k == "link_next") link_next = v;
         else if (k == "link_framesync") link_framesync = v == "1";
         else if (k == "ffb_strength") ffb_strength = std::clamp(std::strtof(v.c_str(), nullptr), 0.0f, 1.0f);
+        else if (k == "ffb_vibration") ffb_vibration = std::clamp(std::strtof(v.c_str(), nullptr), 0.0f, 2.0f);
         else if (k == "ffb_invert") ffb_invert = v == "1";
         else if (k == "ffb_log") ffb_log = v == "1";
         else if (k == "ffb_centring_override") ffb_centring_override = v == "1";
@@ -104,6 +105,7 @@ void Config::save() const {
     f << "link_next=" << link_next << "\n";
     f << "link_framesync=" << (link_framesync ? 1 : 0) << "\n";
     f << "ffb_strength=" << ffb_strength << "\n";
+    f << "ffb_vibration=" << ffb_vibration << "\n";
     f << "ffb_invert=" << (ffb_invert ? 1 : 0) << "\n";
     f << "ffb_log=" << (ffb_log ? 1 : 0) << "\n";
     f << "ffb_centring_override=" << (ffb_centring_override ? 1 : 0) << "\n";

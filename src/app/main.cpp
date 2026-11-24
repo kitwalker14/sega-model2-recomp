@@ -527,6 +527,7 @@ int main(int argc, char **argv) {
                 if (max_frames && game->frames() >= max_frames) running = false;
             }
             // the drive board's commands this frame, as force feedback
+            ffb.set_vibration(cfg.ffb_vibration);
             ffb.update(std::exchange(game->board().io().drive_commands, {}), devices, cfg.controls, cfg.ffb_strength,
                        cfg.ffb_invert, cfg.ffb_log, game->frames(),
                        (float(game->board().io().inputs.steer) - 128.0f) / 96.0f,
